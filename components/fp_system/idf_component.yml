@@ -1,0 +1,16 @@
+## IDF Component Manager manifest for fp_system component
+#
+# BEGINNER EXPLANATION:
+# =====================
+# This file declares external library dependencies for our component.
+# The "idf component manager" downloads and caches these automatically
+# on first build (requires internet connection on first build).
+#
+# joltwallet/littlefs:
+#   - The LittleFS filesystem library for ESP32
+#   - Provides esp_vfs_littlefs_conf_t and esp_vfs_littlefs_register()
+#   - Source: https://components.espressif.com/components/joltwallet/littlefs
+
+dependencies:
+  idf: ">=5.0"
+  joltwallet/littlefs: ">=1.14.8"

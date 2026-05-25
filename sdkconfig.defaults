@@ -1,0 +1,69 @@
+# sdkconfig.defaults — Default build configuration for FP_Module
+#
+# BEGINNER EXPLANATION:
+# =====================
+# This file pre-sets ESP-IDF Kconfig options so you don't have to
+# run "idf.py menuconfig" manually. When you run "idf.py build"
+# for the first time, these values are used as defaults.
+#
+# HOW TO APPLY: These values auto-apply on first build.
+# To change options, edit this file or run: idf.py menuconfig
+
+# ---------- Custom Partition Table ----------
+# Use our partitions.csv instead of the default single-app layout
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---------- LittleFS Filesystem ----------
+# LittleFS is a small, power-safe filesystem for microcontrollers.
+# It stores files in flash, survives crashes and power cuts.
+CONFIG_LITTLEFS_ENABLED=y
+CONFIG_LITTLEFS_PAGE_SIZE=256
+CONFIG_LITTLEFS_OBJ_NAME_LEN=64
+CONFIG_LITTLEFS_READ_SIZE=128
+CONFIG_LITTLEFS_WRITE_SIZE=128
+CONFIG_LITTLEFS_LOOKAHEAD_SIZE=128
+CONFIG_LITTLEFS_CACHE_SIZE=512
+
+# ---------- Bluetooth Classic ----------
+# BEGINNER NOTE:
+# "Bluetooth Classic" is the traditional Bluetooth used by phones
+# for audio and serial communication. We use "SPP" (Serial Port
+# Profile) which lets a smartphone app connect and send/receive
+# text commands just like a wired serial port.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=y
+CONFIG_BT_CLASSIC_ENABLED=y
+CONFIG_BT_SPP_ENABLED=y
+# Disable BLE (Bluetooth Low Energy) to save RAM - we only use Classic BT
+CONFIG_BT_BLE_ENABLED=n
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=n
+CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n
+
+# ---------- CPU Frequency ----------
+# Run at maximum speed for faster image comparison calculations
+CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=240
+
+# ---------- Stack & Heap ----------
+# Increase event task stack to handle BT + UART callbacks safely
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+# Main task stack size (app_main runs here)
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# ---------- UART ----------
+# Place UART interrupt handler in IRAM for faster response
+CONFIG_UART_ISR_IN_IRAM=y
+
+# ---------- Logging ----------
+# Set default log level to INFO (reduce noise but keep useful messages)
+# Change to DEBUG during development: CONFIG_LOG_DEFAULT_LEVEL_DEBUG=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ---------- FreeRTOS ----------
+# Tick rate: 1000 Hz gives 1ms resolution for timeouts
+CONFIG_FREERTOS_HZ=1000
+
+# ---------- Flash ----------
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y

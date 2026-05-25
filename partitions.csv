@@ -1,0 +1,26 @@
+# ESP32 Custom Partition Table for FP_Module
+#
+# BEGINNER EXPLANATION:
+# =====================
+# The ESP32 has 4MB of internal flash memory. This file tells
+# the ESP-IDF build system how to divide that flash among:
+#   - NVS    : Non-Volatile Storage (saves Wi-Fi keys, Bluetooth bonds)
+#   - OTA    : Over-The-Air update bookkeeping
+#   - app0   : Your compiled firmware binary
+#   - littlefs: LittleFS filesystem for fingerprint image files
+#
+# CAPACITY CALCULATION:
+# =====================
+# LittleFS partition = 0x2F0000 bytes = 3,080,192 bytes ≈ 2.94 MB
+# Each user needs: 5 images × 36,864 bytes = 184,320 bytes ≈ 180 KB
+# Max users (approx): 2,940,000 / 184,320 ≈ 15 users
+# (LittleFS has ~10% overhead, so practical limit is ~13 users)
+#
+# To support more users, use a larger flash chip (8MB or 16MB)
+# and adjust the littlefs partition size accordingly.
+#
+# Name,     Type,   SubType,  Offset,     Size,     Flags
+nvs,        data,   nvs,      0x9000,     0x5000,
+otadata,    data,   ota,      0xe000,     0x2000,
+app0,       app,    ota_0,    0x10000,    0x100000,
+littlefs,   data,   spiffs,   0x110000,   0x2F0000,

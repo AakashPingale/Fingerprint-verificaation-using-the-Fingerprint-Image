@@ -1,0 +1,16 @@
+## IDF Component Manager manifest for main component
+#
+# BEGINNER EXPLANATION:
+# =====================
+# This file declares which external components this project uses.
+# The "idf:" entry pins the minimum ESP-IDF version.
+# We don't need external components because:
+#   - LittleFS  → built into ESP-IDF v5.x (esp_littlefs component)
+#   - Bluetooth → built into ESP-IDF (bluedroid stack)
+#   - UART      → built into ESP-IDF (driver component)
+#
+# If you need LittleFS on ESP-IDF v4.x, add:
+#   joltwallet/littlefs: "^1.14.8"
+
+dependencies:
+  idf: ">=5.0"
