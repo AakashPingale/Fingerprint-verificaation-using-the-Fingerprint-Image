@@ -390,3 +390,131 @@ void fp_debug_dump_hex(const char *raw_path)
     printf("--- END RAW IMAGE HEX DUMP (%d bytes) ---\r\n\r\n", total);
     fclose(f);
 }
+
+/* ============================================================
+ * fp_debug_print_base64 — Print image file as Base64 string
+ * ============================================================ */
+static const char s_b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+void fp_debug_print_base64(const char *file_path)
+{
+    FILE *f = fopen(file_path, "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "print_base64: cannot open %s", file_path);
+        return;
+    }
+
+    ESP_LOGI(TAG, "--- BEGIN BASE64: %s ---", file_path);
+    printf("\r\n");
+
+    uint8_t in[3];
+    char out[5];
+    out[4] = '\0';
+    size_t rd;
+    int col = 0;
+
+    while ((rd = fread(in, 1, 3, f)) > 0) {
+        out[0] = s_b64_table[in[0] >> 2];
+        out[1] = s_b64_table[((in[0] & 0x03) << 4) | (rd > 1 ? (in[1] >> 4) : 0)];
+        out[2] = rd > 1 ? s_b64_table[((in[1] & 0x0F) << 2) | (rd > 2 ? (in[2] >> 6) : 0)] : '=';
+        out[3] = rd > 2 ? s_b64_table[in[2] & 0x3F] : '=';
+        
+        printf("%s", out);
+        col += 4;
+        if (col >= 76) {
+            printf("\r\n");
+            col = 0;
+            /* Yield periodically so watchdog doesn't trigger */
+            vTaskDelay(0);
+        }
+    }
+    printf("\r\n--- END BASE64 ---\r\n");
+    fclose(f);
+}
+
+/* ============================================================
+ * fp_debug_print_bmp_base64 — Print .raw as a Base64 BMP image
+ * ============================================================ */
+void fp_debug_print_bmp_base64(const char *raw_path)
+{
+    FILE *f = fopen(raw_path, "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "print_bmp_base64: cannot open %s", raw_path);
+        return;
+    }
+
+    ESP_LOGI(TAG, "--- BEGIN BMP BASE64: %s ---", raw_path);
+    printf("\r\n");
+
+    /* Construct 118-byte BMP Header for 256x288 4-bit Grayscale */
+    const uint8_t bmp_header[118] = {
+        /* BITMAPFILEHEADER (14 bytes) */
+        'B', 'M',               /* Magic */
+        0x76, 0x90, 0x00, 0x00, /* File size (118 + 36864 = 36982 = 0x9076) */
+        0x00, 0x00,             /* Reserved1 */
+        0x00, 0x00,             /* Reserved2 */
+        0x76, 0x00, 0x00, 0x00, /* Pixel data offset (118) */
+
+        /* BITMAPINFOHEADER (40 bytes) */
+        0x28, 0x00, 0x00, 0x00, /* Header size (40) */
+        0x00, 0x01, 0x00, 0x00, /* Width (256 = 0x0100) */
+        0xE0, 0xED, 0xFF, 0xFF, /* Height (-288 = 0xFFFFEDE0) Top-down */
+        0x01, 0x00,             /* Planes (1) */
+        0x04, 0x00,             /* BPP (4-bit) */
+        0x00, 0x00, 0x00, 0x00, /* Compression (None) */
+        0x00, 0x90, 0x00, 0x00, /* Image size (36864 = 0x9000) */
+        0x13, 0x0B, 0x00, 0x00, /* X pixels/m (2835) */
+        0x13, 0x0B, 0x00, 0x00, /* Y pixels/m (2835) */
+        0x10, 0x00, 0x00, 0x00, /* Colors (16) */
+        0x10, 0x00, 0x00, 0x00, /* Important Colors (16) */
+
+        /* PALETTE (16 colors * 4 bytes = 64 bytes) */
+        0x00,0x00,0x00,0x00, 0x11,0x11,0x11,0x00, 0x22,0x22,0x22,0x00, 0x33,0x33,0x33,0x00,
+        0x44,0x44,0x44,0x00, 0x55,0x55,0x55,0x00, 0x66,0x66,0x66,0x00, 0x77,0x77,0x77,0x00,
+        0x88,0x88,0x88,0x00, 0x99,0x99,0x99,0x00, 0xAA,0xAA,0xAA,0x00, 0xBB,0xBB,0xBB,0x00,
+        0xCC,0xCC,0xCC,0x00, 0xDD,0xDD,0xDD,0x00, 0xEE,0xEE,0xEE,0x00, 0xFF,0xFF,0xFF,0x00
+    };
+
+    uint8_t in[3];
+    char out[5];
+    out[4] = '\0';
+    int col = 0;
+    size_t header_idx = 0;
+    bool header_done = false;
+
+    while (true) {
+        int rd = 0;
+        /* Seamlessly buffer 3 bytes from header, then from file */
+        while (rd < 3) {
+            if (!header_done) {
+                in[rd++] = bmp_header[header_idx++];
+                if (header_idx >= sizeof(bmp_header)) {
+                    header_done = true;
+                }
+            } else {
+                if (fread(&in[rd], 1, 1, f) == 0) break;
+                rd++;
+            }
+        }
+
+        if (rd == 0) break;
+
+        out[0] = s_b64_table[in[0] >> 2];
+        out[1] = s_b64_table[((in[0] & 0x03) << 4) | (rd > 1 ? (in[1] >> 4) : 0)];
+        out[2] = rd > 1 ? s_b64_table[((in[1] & 0x0F) << 2) | (rd > 2 ? (in[2] >> 6) : 0)] : '=';
+        out[3] = rd > 2 ? s_b64_table[in[2] & 0x3F] : '=';
+        
+        printf("%s", out);
+        col += 4;
+        if (col >= 76) {
+            printf("\r\n");
+            col = 0;
+            vTaskDelay(0); /* Yield */
+        }
+
+        if (rd < 3) break;
+    }
+
+    printf("\r\n--- END BMP BASE64 ---\r\n");
+    fclose(f);
+}

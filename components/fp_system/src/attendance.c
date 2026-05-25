@@ -225,6 +225,9 @@ esp_err_t attendance_register_user(uint8_t user_id)
             fp_storage_get_image_path(user_id, (uint8_t)img, img_path, sizeof(img_path));
             ESP_LOGI(TAG, "Printing captured image to terminal...");
             fp_debug_print_terminal(img_path, FP_DBG_COL_STEP, FP_DBG_ROW_STEP);
+
+            ESP_LOGI(TAG, "Printing base64 of the RAW image (BMP Format)...");
+            fp_debug_print_bmp_base64(img_path);
         }
 
         /* ── Countdown before next image (except after the last one) ── */
@@ -237,7 +240,7 @@ esp_err_t attendance_register_user(uint8_t user_id)
     fp_meta_t meta = {
         .user_id     = user_id,
         .image_count = FP_IMAGES_PER_USER,
-        .threshold   = FP_DEFAULT_THRESHOLD,
+        .threshold   = FP_SIMILARITY_THRESHOLD,
     };
     /* Simple date string using FreeRTOS uptime (no RTC in this example).
      * If you have an RTC module, replace this with real date/time. */
@@ -250,7 +253,7 @@ esp_err_t attendance_register_user(uint8_t user_id)
     /* ── Done ── */
     bt_sendf("OK,SET,ID:%d,DONE — All %d images stored\r\n",
              user_id, FP_IMAGES_PER_USER);
-    bt_sendf("Similarity threshold: %d%%\r\n", FP_DEFAULT_THRESHOLD);
+    bt_sendf("Similarity threshold: %d%%\r\n", FP_SIMILARITY_THRESHOLD);
 
     return ESP_OK;
 }
@@ -327,6 +330,13 @@ void attendance_verify(void)
     char tmp_path[FP_MAX_PATH];
     fp_storage_get_tmp_path(tmp_path, sizeof(tmp_path));
 
+    ESP_LOGI(TAG, "Printing base64 of the verification RAW image (BMP Format)...");
+    fp_debug_print_bmp_base64(tmp_path);
+
+    /* Get path to the temporary verification binary image for comparison */
+    char tmp_bin_path[FP_MAX_PATH];
+    fp_storage_get_tmp_bin_path(tmp_bin_path, sizeof(tmp_bin_path));
+
     /* ── STEP 3: Compare against all registered users ── */
     uint8_t user_ids[FP_MAX_USERS];
     int user_count = fp_storage_list_users(user_ids, FP_MAX_USERS);
@@ -356,7 +366,7 @@ void attendance_verify(void)
         /* Compare query against all stored images for this user */
         uint8_t user_best = 0;
         uint8_t user_best_idx = 1;
-        int cmp_ret = fp_compare_best_for_user(tmp_path, uid,
+        int cmp_ret = fp_compare_best_for_user(tmp_bin_path, uid,
                                                meta.image_count, &user_best, &user_best_idx);
         if (cmp_ret != FP_OK) {
             bt_sendf("  ERR,COMPARE_FAILED,ID:%d\r\n", uid);
@@ -374,31 +384,31 @@ void attendance_verify(void)
 
     /* ── STEP 4: Report result & Show side-by-side comparison in terminal ──
      * Compare best_sim against threshold.
-     * We use the global default threshold (FP_DEFAULT_THRESHOLD).
+     * We use the global default threshold (FP_SIMILARITY_THRESHOLD).
      * For per-user thresholds, read from user's meta.txt. */
     bt_send("\r\n--- Result ---\r\n");
 
-    if (best_uid >= 0 && best_sim >= FP_DEFAULT_THRESHOLD) {
+    if (best_uid >= 0 && best_sim >= FP_SIMILARITY_THRESHOLD) {
         /* ✅ MATCH */
         bt_sendf("MATCH,ID:%d,SIM:%d%%\r\n", best_uid, best_sim);
         ESP_LOGI(TAG, "VERIFY: MATCH user=%d sim=%d%%", best_uid, best_sim);
 
         /* Print side-by-side visual comparison in terminal stdout */
         char best_stored_path[FP_MAX_PATH];
-        fp_storage_get_image_path((uint8_t)best_uid, best_img_idx, best_stored_path, sizeof(best_stored_path));
-        fp_debug_compare_visual(best_stored_path, tmp_path, best_sim);
+        fp_storage_get_bin_path((uint8_t)best_uid, best_img_idx, best_stored_path, sizeof(best_stored_path));
+        fp_debug_compare_visual(best_stored_path, tmp_bin_path, best_sim);
 
         attendance_log_event((uint8_t)best_uid, best_sim);
     } else {
         /* ❌ NO MATCH */
         if (best_uid >= 0) {
             bt_sendf("NO_MATCH — Best was user %d at %d%% (threshold: %d%%)\r\n",
-                     best_uid, best_sim, FP_DEFAULT_THRESHOLD);
+                     best_uid, best_sim, FP_SIMILARITY_THRESHOLD);
 
             /* Even on NO_MATCH, visually display the closest matching fingerprint */
             char best_stored_path[FP_MAX_PATH];
-            fp_storage_get_image_path((uint8_t)best_uid, best_img_idx, best_stored_path, sizeof(best_stored_path));
-            fp_debug_compare_visual(best_stored_path, tmp_path, best_sim);
+            fp_storage_get_bin_path((uint8_t)best_uid, best_img_idx, best_stored_path, sizeof(best_stored_path));
+            fp_debug_compare_visual(best_stored_path, tmp_bin_path, best_sim);
         } else {
             bt_send("NO_MATCH — No users to compare against\r\n");
         }

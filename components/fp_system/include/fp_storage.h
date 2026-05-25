@@ -142,6 +142,9 @@ void fp_storage_delete_tmp(void);
 /** @brief Get the full path to the temporary verification image. */
 void fp_storage_get_tmp_path(char *buf, size_t buf_size);
 
+/** @brief Get the full path to the temporary verification binary image. */
+void fp_storage_get_tmp_bin_path(char *buf, size_t buf_size);
+
 /* ============================================================
  * PUBLIC API — Metadata
  * ============================================================ */
@@ -162,6 +165,19 @@ esp_err_t fp_storage_read_meta(uint8_t user_id, fp_meta_t *meta);
  */
 void fp_storage_get_image_path(uint8_t user_id, uint8_t img_num,
                                 char *buf, size_t buf_size);
+
+/**
+ * @brief Build the full file path to a stored binary fingerprint image.
+ */
+void fp_storage_get_bin_path(uint8_t user_id, uint8_t img_num,
+                             char *buf, size_t buf_size);
+
+/* ============================================================
+ * PUBLIC API — Binary Storage Upgrade
+ * ============================================================ */
+esp_err_t fp_storage_open_write_bin(uint8_t user_id, uint8_t img_num);
+esp_err_t fp_storage_write_chunk_bin(const uint8_t *data, size_t len);
+void fp_storage_delete_bin(uint8_t user_id, uint8_t img_num);
 
 /* ============================================================
  * PUBLIC API — User Management

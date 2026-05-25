@@ -46,9 +46,10 @@
 
 static const char *TAG = "fp_storage";
 
-/* Currently open file for streaming write operations.
+/* Currently open files for streaming write operations.
  * NULL when no write is in progress. */
-static FILE *s_write_file = NULL;
+static FILE *s_write_file_raw = NULL;
+static FILE *s_write_file_bin = NULL;
 
 /* ============================================================
  * fp_storage_init — Mount LittleFS, prepare directory structure
@@ -96,11 +97,14 @@ esp_err_t fp_storage_init(void)
  * ============================================================ */
 esp_err_t fp_storage_open_write(uint8_t user_id, uint8_t img_num)
 {
-    /* Close any previously open file (safety measure) */
-    if (s_write_file) {
-        ESP_LOGW(TAG, "open_write: closing leaked file handle");
-        fclose(s_write_file);
-        s_write_file = NULL;
+    /* Close any previously open files (safety measure) */
+    if (s_write_file_raw) {
+        fclose(s_write_file_raw);
+        s_write_file_raw = NULL;
+    }
+    if (s_write_file_bin) {
+        fclose(s_write_file_bin);
+        s_write_file_bin = NULL;
     }
 
     /* Create user directory first */
@@ -108,20 +112,28 @@ esp_err_t fp_storage_open_write(uint8_t user_id, uint8_t img_num)
     snprintf(dir_path, sizeof(dir_path), "%s/%d", FP_ROOT_DIR, user_id);
     mkdir(dir_path, 0777);  /* OK if already exists */
 
-    /* Build file path */
-    char file_path[FP_MAX_PATH];
-    snprintf(file_path, sizeof(file_path), "%s/%d/fp%d.raw",
-             FP_ROOT_DIR, user_id, img_num);
+    /* Build file paths */
+    char file_path_raw[FP_MAX_PATH];
+    char file_path_bin[FP_MAX_PATH];
+    snprintf(file_path_raw, sizeof(file_path_raw), "%s/%d/fp%d.raw", FP_ROOT_DIR, user_id, img_num);
+    snprintf(file_path_bin, sizeof(file_path_bin), "%s/%d/fp%d.bin", FP_ROOT_DIR, user_id, img_num);
 
-    /* Open for binary write — creates file if not exists, truncates if exists */
-    s_write_file = fopen(file_path, "wb");
-    if (!s_write_file) {
-        ESP_LOGE(TAG, "open_write: cannot open '%s': %s",
-                 file_path, strerror(errno));
+    /* Open for binary write */
+    s_write_file_raw = fopen(file_path_raw, "wb");
+    if (!s_write_file_raw) {
+        ESP_LOGE(TAG, "open_write: cannot open '%s': %s", file_path_raw, strerror(errno));
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "Opened for write: %s", file_path);
+    s_write_file_bin = fopen(file_path_bin, "wb");
+    if (!s_write_file_bin) {
+        ESP_LOGE(TAG, "open_write: cannot open '%s': %s", file_path_bin, strerror(errno));
+        fclose(s_write_file_raw);
+        s_write_file_raw = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(TAG, "Opened for write: %s and .bin", file_path_raw);
     return ESP_OK;
 }
 
@@ -130,15 +142,39 @@ esp_err_t fp_storage_open_write(uint8_t user_id, uint8_t img_num)
  * ============================================================ */
 esp_err_t fp_storage_write_chunk(const uint8_t *data, size_t len)
 {
-    if (!s_write_file) {
-        ESP_LOGE(TAG, "write_chunk: no file open — call open_write first");
+    if (!s_write_file_raw || !s_write_file_bin) {
+        ESP_LOGE(TAG, "write_chunk: files not open");
         return ESP_ERR_INVALID_STATE;
     }
 
-    size_t written = fwrite(data, 1, len, s_write_file);
-    if (written != len) {
-        ESP_LOGE(TAG, "write_chunk: wrote %zu of %zu bytes "
-                 "(flash full or I/O error)", written, len);
+    /* Step 1 - Write raw 128 bytes */
+    size_t written_raw = fwrite(data, 1, len, s_write_file_raw);
+    if (written_raw != len) {
+        ESP_LOGE(TAG, "write_chunk: raw flash full or I/O error");
+        return ESP_ERR_NO_MEM;
+    }
+
+    /* Step 2 - Binarize into 32-byte binary buffer */
+    uint8_t bin_buf[FP_BIN_ROW_BYTES] = {0};
+
+    for (size_t i = 0; i < len; i++) {
+        uint8_t pixel_a = (data[i] >> 4) & 0x0F;
+        uint8_t pixel_b = data[i] & 0x0F;
+
+        uint8_t bit_a = (pixel_a > FP_BIN_THRESHOLD) ? 1 : 0;
+        uint8_t bit_b = (pixel_b > FP_BIN_THRESHOLD) ? 1 : 0;
+
+        size_t pixel_idx_a = i * 2;
+        size_t pixel_idx_b = i * 2 + 1;
+
+        if (bit_a) bin_buf[pixel_idx_a / 8] |= (1 << (7 - (pixel_idx_a % 8)));
+        if (bit_b) bin_buf[pixel_idx_b / 8] |= (1 << (7 - (pixel_idx_b % 8)));
+    }
+
+    /* Step 3 - Write 32-byte binary chunk */
+    size_t written_bin = fwrite(bin_buf, 1, FP_BIN_ROW_BYTES, s_write_file_bin);
+    if (written_bin != FP_BIN_ROW_BYTES) {
+        ESP_LOGE(TAG, "write_chunk: bin flash full or I/O error");
         return ESP_ERR_NO_MEM;
     }
 
@@ -150,16 +186,18 @@ esp_err_t fp_storage_write_chunk(const uint8_t *data, size_t len)
  * ============================================================ */
 esp_err_t fp_storage_close_write(void)
 {
-    if (!s_write_file) {
-        return ESP_OK;  /* Nothing to close */
+    if (s_write_file_raw) {
+        fflush(s_write_file_raw);
+        fclose(s_write_file_raw);
+        s_write_file_raw = NULL;
+    }
+    if (s_write_file_bin) {
+        fflush(s_write_file_bin);
+        fclose(s_write_file_bin);
+        s_write_file_bin = NULL;
     }
 
-    /* fflush ensures all buffered data is written to flash before fclose */
-    fflush(s_write_file);
-    fclose(s_write_file);
-    s_write_file = NULL;
-
-    ESP_LOGD(TAG, "Write file closed");
+    ESP_LOGD(TAG, "Write files closed");
     return ESP_OK;
 }
 
@@ -187,33 +225,54 @@ void fp_storage_get_tmp_path(char *buf, size_t buf_size)
     snprintf(buf, buf_size, "%s/verify.raw", FP_TMP_DIR);
 }
 
+void fp_storage_get_tmp_bin_path(char *buf, size_t buf_size)
+{
+    snprintf(buf, buf_size, "%s/verify.bin", FP_TMP_DIR);
+}
+
 esp_err_t fp_storage_open_write_tmp(void)
 {
-    if (s_write_file) {
-        fclose(s_write_file);
-        s_write_file = NULL;
+    if (s_write_file_raw) {
+        fclose(s_write_file_raw);
+        s_write_file_raw = NULL;
+    }
+    if (s_write_file_bin) {
+        fclose(s_write_file_bin);
+        s_write_file_bin = NULL;
     }
 
-    char path[FP_MAX_PATH];
-    fp_storage_get_tmp_path(path, sizeof(path));
+    char path_raw[FP_MAX_PATH];
+    char path_bin[FP_MAX_PATH];
+    fp_storage_get_tmp_path(path_raw, sizeof(path_raw));
+    fp_storage_get_tmp_bin_path(path_bin, sizeof(path_bin));
 
-    s_write_file = fopen(path, "wb");
-    if (!s_write_file) {
-        ESP_LOGE(TAG, "open_write_tmp: cannot open '%s': %s",
-                 path, strerror(errno));
+    s_write_file_raw = fopen(path_raw, "wb");
+    if (!s_write_file_raw) {
+        ESP_LOGE(TAG, "open_write_tmp: cannot open '%s': %s", path_raw, strerror(errno));
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "Temp verify file opened: %s", path);
+    s_write_file_bin = fopen(path_bin, "wb");
+    if (!s_write_file_bin) {
+        ESP_LOGE(TAG, "open_write_tmp: cannot open '%s': %s", path_bin, strerror(errno));
+        fclose(s_write_file_raw);
+        s_write_file_raw = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(TAG, "Temp verify files opened");
     return ESP_OK;
 }
 
 void fp_storage_delete_tmp(void)
 {
-    char path[FP_MAX_PATH];
-    fp_storage_get_tmp_path(path, sizeof(path));
-    remove(path);
-    ESP_LOGD(TAG, "Temp file deleted");
+    char path_raw[FP_MAX_PATH];
+    char path_bin[FP_MAX_PATH];
+    fp_storage_get_tmp_path(path_raw, sizeof(path_raw));
+    fp_storage_get_tmp_bin_path(path_bin, sizeof(path_bin));
+    remove(path_raw);
+    remove(path_bin);
+    ESP_LOGD(TAG, "Temp files deleted");
 }
 
 /* ============================================================
@@ -290,6 +349,24 @@ esp_err_t fp_storage_read_meta(uint8_t user_id, fp_meta_t *meta)
         }
     }
     fclose(f);
+
+    /* Migration Check: If .raw exists but .bin is missing, user needs to re-register */
+    char bin_path[FP_MAX_PATH];
+    char raw_path[FP_MAX_PATH];
+    fp_storage_get_bin_path(user_id, 1, bin_path, sizeof(bin_path));
+    fp_storage_get_image_path(user_id, 1, raw_path, sizeof(raw_path));
+
+    FILE *f_bin = fopen(bin_path, "r");
+    if (!f_bin) {
+        FILE *f_raw = fopen(raw_path, "r");
+        if (f_raw) {
+            fclose(f_raw);
+            return ESP_ERR_INVALID_VERSION; /* Needs Re-registration */
+        }
+    } else {
+        fclose(f_bin);
+    }
+
     return ESP_OK;
 }
 
@@ -301,6 +378,32 @@ void fp_storage_get_image_path(uint8_t user_id, uint8_t img_num,
 {
     snprintf(buf, buf_size, "%s/%d/fp%d.raw",
              FP_ROOT_DIR, user_id, img_num);
+}
+
+void fp_storage_get_bin_path(uint8_t user_id, uint8_t img_num,
+                             char *buf, size_t buf_size)
+{
+    snprintf(buf, buf_size, "%s/%d/fp%d.bin",
+             FP_ROOT_DIR, user_id, img_num);
+}
+
+esp_err_t fp_storage_open_write_bin(uint8_t user_id, uint8_t img_num)
+{
+    /* Handled simultaneously in fp_storage_open_write */
+    return ESP_OK;
+}
+
+esp_err_t fp_storage_write_chunk_bin(const uint8_t *data, size_t len)
+{
+    /* Handled simultaneously in fp_storage_write_chunk */
+    return ESP_OK;
+}
+
+void fp_storage_delete_bin(uint8_t user_id, uint8_t img_num)
+{
+    char path[FP_MAX_PATH];
+    fp_storage_get_bin_path(user_id, img_num, path, sizeof(path));
+    remove(path);
 }
 
 /* ============================================================
@@ -322,11 +425,13 @@ esp_err_t fp_storage_delete_user(uint8_t user_id)
 {
     char path[FP_MAX_PATH];
 
-    /* Delete each raw image file */
+    /* Delete each raw and bin image file */
     for (int i = 1; i <= FP_IMAGES_PER_USER; i++) {
-        snprintf(path, sizeof(path), "%s/%d/fp%d.raw",
-                 FP_ROOT_DIR, user_id, i);
-        remove(path);  /* Silently ignore if file doesn't exist */
+        snprintf(path, sizeof(path), "%s/%d/fp%d.raw", FP_ROOT_DIR, user_id, i);
+        remove(path);
+        
+        snprintf(path, sizeof(path), "%s/%d/fp%d.bin", FP_ROOT_DIR, user_id, i);
+        remove(path);
     }
 
     /* Delete meta.txt */

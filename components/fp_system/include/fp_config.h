@@ -150,6 +150,16 @@
 #define FP_DEFAULT_THRESHOLD  70      /* Minimum similarity% to declare MATCH  */
 #define FP_HIST_GATE_THRESHOLD 0.50f  /* Bhattacharyya gate: reject if BC < this*/
 
+/* BINARY ROI VERIFICATION UPGRADE */
+#define FP_BIN_THRESHOLD        7     /* 4-bit binarization threshold */
+#define FP_ROI_START_ROW        44
+#define FP_ROI_END_ROW          244
+#define FP_ROI_START_COL        48
+#define FP_ROI_END_COL          208
+#define FP_BIN_ROW_BYTES        32    /* 256 pixels / 8 bits = 32 bytes */
+#define FP_ROI_ROW_BYTES        20    /* (208-48=160 pixels) / 8 bits = 20 bytes */
+#define FP_SIMILARITY_THRESHOLD 72    /* Minimum binary similarity% for MATCH */
+
 /* ============================================================
  * SECTION 7 — FILESYSTEM PATHS
  * ============================================================ */

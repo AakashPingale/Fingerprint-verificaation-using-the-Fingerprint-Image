@@ -131,4 +131,16 @@ void fp_debug_compare_visual(const char *stored_path, const char *query_path,
  */
 void fp_debug_dump_hex(const char *raw_path);
 
+/**
+ * @brief Print the contents of a file as a Base64 string to the terminal.
+ * Useful for exporting images via serial monitor.
+ */
+void fp_debug_print_base64(const char *file_path);
+
+/**
+ * @brief Print the raw image file as a Base64 encoded BMP image.
+ * This prepends a 4-bit grayscale BMP header so it can be viewed in a browser.
+ */
+void fp_debug_print_bmp_base64(const char *raw_path);
+
 #endif /* FP_DEBUG_H */
